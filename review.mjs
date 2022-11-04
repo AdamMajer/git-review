@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { argv } from 'node:process';
 
 const CommitText = Symbol('Commit Text');
 const GpgSigIndexes = Symbol('GPG Sig Indexes');
@@ -137,6 +138,10 @@ function CheckSignatures(keyring, raw_commit, headers) {
 	const commit_msg = raw_commit.slice(0, headers[GpgSigIndexes][0]) + raw_commit.slice(headers[GpgSigIndexes][1]+1);
 	const signature = headers.gpgsig;
 
+	if (!signature) {
+		return Promise.resolve('');
+	}
+
 	return new Promise((accepted, rejected) => {
 		let status = [];
 
@@ -194,10 +199,16 @@ function ValidateSignatures(sigs) {
 		}
 	}
 
+	// no signatures, so can't be valid commit
+	if (Object.keys(sig_results).length < 2)
+		sig_results.valid = false;
+
 	return sig_results;
 }
 
-Promise.all([ReadKeyringConfig(), ParseCommit('HEAD')])
+const hash = argv.length > 2 ? argv[2] : 'HEAD';
+
+Promise.all([ReadKeyringConfig(), ParseCommit(hash)])
 .then((values) => {
 	const keyring_config = values[0];
 	const [raw_commit, headers] = values[1];
@@ -208,7 +219,7 @@ Promise.all([ReadKeyringConfig(), ParseCommit('HEAD')])
 		keyring['id'] = k;
 
 		return CheckSignatures(keyring, raw_commit, headers)
-		.then(ParseSigResults)
+		.then(sig_checks => ParseSigResults(sig_checks))
 		.then(res => {return {keyring: keyring, results: res}});
 	}).flat();
 	return Promise.all(signatures).then(sigs => {
