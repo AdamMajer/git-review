@@ -166,7 +166,7 @@ function CheckSignatures(keyring, raw_commit, headers) {
 function ValidateSignatures(sigs) {
 	// sort results by keyid and make sure that
 	// we have at-least one keyring validate each signature
-	const sig_results = {valid: true};
+	const sig_results = {};
 	for (let i=0; i<sigs.length; i++) {
 		if (i<sigs.length-1 && sigs[i]["results"].length !== sigs[i+1]["results"].length) {
 			throw "Number of signatures different in different keyrings";
@@ -189,7 +189,6 @@ function ValidateSignatures(sigs) {
 
 			if (!sig.is_valid) {
 				sig_results[keyid].is_valid = false;
-				sig_results.valid = false;
 			}
 			if (sig_results[keyid].is_missing) {
 				sig_results[keyid].is_missing = false;
@@ -200,8 +199,17 @@ function ValidateSignatures(sigs) {
 	}
 
 	// no signatures, so can't be valid commit
-	if (Object.keys(sig_results).length < 2)
-		sig_results.valid = false;
+	const keyids = Object.keys(sig_results);
+	let is_valid = undefined;
+	keyids.forEach(keyid => {
+		if (sig_results[keyid].is_missing)
+			return;
+		if (!sig_results[keyid].is_valid)
+			is_valid = false;
+		else if (is_valid === undefined)
+			is_valid = true;
+	})
+	sig_results.valid = is_valid;
 
 	return sig_results;
 }
