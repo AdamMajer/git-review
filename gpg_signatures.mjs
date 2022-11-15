@@ -1,5 +1,67 @@
 import { spawn } from 'node:child_process'
-import { GpgSigIndexes } from './commit.mjs'
+import { SignedData } from './commit.mjs'
+
+// see rfc4880 §6
+function DearmorSignature(signature) {
+	const lines = signature.split('\n');
+
+	const start = lines[0];
+	const end = lines[lines.length - 1];
+
+	if (start.replace('BEGIN', 'END') !== end)
+		throw "Invalid PGP signature";
+
+	// remove the start and end of the signature
+	lines.pop();
+	lines.shift();
+
+	// remove the headers
+	while (lines[0].length > 0)
+		lines.shift();
+	lines.shift();
+
+	// remove checksum on the last line
+	if (lines[lines.length-1].startsWith('='))
+		lines.pop();
+
+	// remaining is a base64 encoded PGP signature
+	return Buffer.from(lines.join(''), 'base64');
+}
+
+// see rfc4880 §6
+function SignatureCRC(sig)
+{
+	const CRC24_INIT = 0xB704CE;
+	const CRC24_POLY = 0x1864CFB;
+
+	let crc = CRC24_INIT;
+	for (let pos=0; pos<sig.length; pos++) {
+
+		crc ^= sig.at(pos) << 16;
+		for (let i = 0; i < 8; i++) {
+			crc <<= 1;
+			if (crc & 0x1000000)
+				crc ^= CRC24_POLY;
+		}
+
+		crc &= 0xFFFFFF;
+	}
+
+	return Buffer.from([crc >> 16, (crc >> 8) & 0xFF, crc & 0xFF])
+}
+
+// see rfc4880 §6
+function EnarmorSignature(signature) {
+	const encoded = signature.toString('base64');
+	const lines = [];
+	for (let i=0; i<encoded.length; i+=64)
+		lines.push(encoded.slice(i, i+64));
+
+	return '-----BEGIN PGP SIGNATURE-----\n\n' +
+		lines.join('\n') + '\n' +
+		'=' + SignatureCRC(signature).toString('base64') + '\n' +
+		'-----END PGP SIGNATURE-----';
+}
 
 function SigTimestampToDate(ts) {
 	if (ts === '0')
@@ -64,9 +126,44 @@ function ParseSigResults(result_string) {
 	})
 }
 
-function CheckSignatures(keyring, raw_commit, headers) {
-	const commit_msg = raw_commit.slice(0, headers[GpgSigIndexes][0]) + raw_commit.slice(headers[GpgSigIndexes][1]+1);
+function ListSignatures(headers) {
 	const signature = headers.gpgsig;
+
+	return new Promise((accepted, rejected) => {
+		const gpg_verify = spawn('gpgv2', ['--keyring', '/dev/null', '--status-fd', '3', '--enable-special-filenames', '--', '-&4', '/dev/null'], {stdio: ['ignore', 'ignore', 'inherit', 'pipe', 'pipe']});
+		let status = [];
+
+		console.log(signature);
+		gpg_verify.stdio[3].on('data', d => status.push(d));
+		gpg_verify.stdio[4].end(signature);
+
+		gpg_verify.on('error', (code) => {
+			if (code == 0) {
+				accepted(status.join('').toString('utf-8'));
+				return;
+			}
+
+			console.error('gpgv2 returned status:', err);
+			rejected('ListSignatures error code ' + err);
+		})
+		gpg_verify.on('error', (err) => {
+			console.error('Got an error', err);
+		});
+	})
+	.then ((result_string) => ParseSigResults(result_string))
+	.then (data => {
+		return data
+		.map(res => {
+			if (Object.hasOwn(res, 'keyid') && Object.hasOwn(res, 'timestamp'))
+				return { "keyid": res.keyid, "timestamp": res.timestamp };
+			return undefined;
+		})
+		.filter(obj => obj !== undefined);
+	});
+}
+
+function CheckSignatures(keyring, commit) {
+	const signature = headers['gpgsig'];
 
 	if (!signature) {
 		return Promise.resolve('');
@@ -77,15 +174,14 @@ function CheckSignatures(keyring, raw_commit, headers) {
 
 		const gpg_verify = spawn('gpgv2', ['--keyring', keyring.filename, '--status-fd', '3', '--enable-special-filenames', '--', '-&4', '-&5'], {stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe', 'pipe']});
 		gpg_verify.stdio[3].on('data', d => status.push(d));
-		gpg_verify.stdio[3].on('end', () => {
-			accepted(status.join('').toString('utf-8'));
-		});
+		gpg_verify.stdio[4].end(signature);
+		gpg_verify.stdio[5].end(commit[SignedData]);
 
-		gpg_verify.stdio[4].write(signature);
-		gpg_verify.stdio[4].end();
-		gpg_verify.stdio[5].write(commit_msg);
-		gpg_verify.stdio[5].end();
-
+		gpg_verify.on('exit', code => {
+			if (code === 0) {
+				accepted(status.join('').toString('utf-8'));
+			}
+		})
 		gpg_verify.on('error', (err) => {
 			console.error('Got an error', err);
 			rejected(err);
@@ -146,7 +242,10 @@ function ValidateSignatures(sigs) {
 
 
 export {
+	DearmorSignature,
+	EnarmorSignature,
 	CheckSignatures,
+	ListSignatures,
 	ParseSigResults,
 	ValidateSignatures
 }

@@ -2,7 +2,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { argv } from 'node:process';
-import { GpgSigIndexes, ParseCommit } from './commit.mjs';
+import { ParseCommit } from './commit.mjs';
 import { CheckSignatures, ParseSigResults, ValidateSignatures } from './gpg_signatures.mjs';
 
 
@@ -18,14 +18,14 @@ const hash = argv.length > 2 ? argv[2] : 'HEAD';
 Promise.all([ReadKeyringConfig(), ParseCommit(hash)])
 .then((values) => {
 	const keyring_config = values[0];
-	const [raw_commit, headers] = values[1];
+	const commit = values[1];
 
 	const signatures = Object.keys(keyring_config)
 	.map(k => {
 		const keyring = keyring_config[k];
 		keyring['id'] = k;
 
-		return CheckSignatures(keyring, raw_commit, headers)
+		return CheckSignatures(keyring, commit)
 		.then(sig_checks => ParseSigResults(sig_checks))
 		.then(res => {return {keyring: keyring, results: res}});
 	}).flat();
