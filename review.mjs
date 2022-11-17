@@ -20,19 +20,26 @@ Promise.all([ReadKeyringConfig(), ParseCommit(hash)])
 	const keyring_config = values[0];
 	const commit = values[1];
 
-	const signatures = Object.keys(keyring_config)
-	.map(k => {
-		const keyring = keyring_config[k];
-		keyring['id'] = k;
+	const signatures = Promise.all(
+		Object.keys(keyring_config)
+		.map(k => {
+			const keyring = keyring_config[k];
+			keyring['id'] = k;
 
-		return CheckSignatures(keyring, commit)
-		.then(sig_checks => ParseSigResults(sig_checks))
-		.then(res => {return {keyring: keyring, results: res}});
-	}).flat();
-	return Promise.all(signatures).then(sigs => {
-		headers['signatures'] = ValidateSignatures(sigs);
-		return headers;
-	})
+			return CheckSignatures(keyring, commit)
+			.then(sig_checks => ParseSigResults(sig_checks))
+			.then(res => {return {keyring: keyring, results: res}})
+			.catch(error => {
+				console.error(error);
+				return {keyring: keyring, results: undefined};
+			});
+		})
+	).then(sigs => {
+		commit['signatures'] = ValidateSignatures(sigs);
+		return commit;
+	});
+
+	return signatures;
 })
 .then(sigs => console.log(sigs)) //JSON.stringify(sigs, undefined, 4)))
 .catch(err => {

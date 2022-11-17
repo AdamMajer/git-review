@@ -163,7 +163,7 @@ function ListSignatures(headers) {
 }
 
 function CheckSignatures(keyring, commit) {
-	const signature = headers['gpgsig'];
+	const signature = commit['gpgsig'];
 
 	if (!signature) {
 		return Promise.resolve('');
@@ -172,20 +172,18 @@ function CheckSignatures(keyring, commit) {
 	return new Promise((accepted, rejected) => {
 		let status = [];
 
-		const gpg_verify = spawn('gpgv2', ['--keyring', keyring.filename, '--status-fd', '3', '--enable-special-filenames', '--', '-&4', '-&5'], {stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe', 'pipe']});
+		const params = ['--keyring', keyring.filename, '--status-fd', '3', '--enable-special-filenames', '--', '-&4', '-&5'];
+		const gpg_verify = spawn('gpgv2', params, {stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe', 'pipe']});
 		gpg_verify.stdio[3].on('data', d => status.push(d));
 		gpg_verify.stdio[4].end(signature);
 		gpg_verify.stdio[5].end(commit[SignedData]);
 
-		gpg_verify.on('exit', code => {
-			if (code === 0) {
-				accepted(status.join('').toString('utf-8'));
-			}
+		gpg_verify.on('exit', (code) => {
+			accepted(status.join('').toString('utf-8'));
 		})
-		gpg_verify.on('error', (err) => {
-			console.error('Got an error', err);
-			rejected(err);
-		});
+		gpg_verify.on('error', (error) => {
+			rejected(error);
+		})
 	});
 }
 

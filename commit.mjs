@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process'
 
 const CommitText = Symbol('Commit Text');
-const GpgSigIdx = Symbol('GPG Sig Indexes');
-const SignedData = Symbol('SignedData');
+const GpgSigIdx = Symbol('GPG Signature Start Offset');
+const SignedData = Symbol('Signed Data');
 
 function ParseCommit(hash) {
 	return new Promise((accepted, rejected) => {
